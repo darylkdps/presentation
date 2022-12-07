@@ -103,7 +103,7 @@ else:
     data_path = Path.cwd() / 'app/Data/'
 
 
-st.text(data_path)
+st.text(f'{data_path}/Simulated_Data_{str(2022)}.xlsx')
 
 # @st.cache(allow_output_mutation=True)
 # def getNLP():
