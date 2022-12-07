@@ -102,16 +102,12 @@ if 'D:' in str(Path.cwd()):
 else:
     data_path = Path.cwd() / 'app/Data/'
 
-
-st.text(f'{data_path}/Simulated_Data_{str(2022)}.xlsx')
-
 # @st.cache(allow_output_mutation=True)
 # def getNLP():
 #     return spacy.load( data_path / 'trained-pipeline-2000')
 
 @st.cache(allow_output_mutation=True)
-def get_dataframe():
-    
+def get_dataframe():    
 
     # Read data files
     df_dict = {}
