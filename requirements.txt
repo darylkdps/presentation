@@ -1,2 +1,5 @@
 streamlit
-pywhisper
+numpy
+pandas
+plotly
+scipy

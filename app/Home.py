@@ -1,16 +1,20 @@
+import math
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
-import pywhisper
+# import spacy
+from collections import namedtuple
 from pathlib import Path
-from tempfile import NamedTemporaryFile
-from datetime import timedelta
-from datetime import datetime
+from scipy.stats import ttest_ind
+
 
 # Set configuration
 st.set_page_config(
-    page_title="Daryl's Transcription Web App",
-    page_icon='💬',
-    layout='centered',
-    initial_sidebar_state='collapsed',
+    page_title="Web Presentation",
+    page_icon='🖥️',
+    layout='wide',
+    initial_sidebar_state='expanded',
     menu_items={
         'About': '''This is developed by Daryl Ku (Research Associate), Academic Quality Unit,
         Office of Strategic Planning and Academic Quality (SPAQ), National Institute of
@@ -22,180 +26,419 @@ st.set_page_config(
 
 # Display title
 st.title(
-    '''Transcribe or Translate Speech'''
+    '''Survey Analysis Prototype'''
     )
 
 # Display instructions
 st.markdown(
     '''
-    This web application uses Open AI's _Whisper_ to automatically transcribe or translate (WIP)
-    speech. _Whisper_ is a neural network based automatic speech recognition system. It offers
-    five levels of speed-accuracy performance:
-    - Faster
-    - Fast
-    - Balanced
-    - Accurate
-    - More Accurate
-    
-    I am using a free Streamlit plan to host this web application. The plan provides very
-    limited memory so only the models with small memory footprint can be loaded. Exceeding the
-    memory allocated will crash this application so I have restricted the models and the size of
-    the audio and video files that can be used.
-
-    __Do not use with audio or video files over 30 mins in duration.__ I have not tested if it
-    will crash or automatically reset. Contact me if you want better accuracy or have files
-    with longer duration.
+    This is a prototype to demonstrate the deployment of a data processing pipeline online. Data from 
+    separate Excel files are read in individually. It is then wrangled and analysed. The output is a
+    visualisation similar to that illustrated in its Power BI counterpart.
+    Significance and effect size is always in relation to the previous year.
     ''')
 
-# Set transcription preview length in segments 
-preview_length = 5
-
-# Map selections to Whisper models
-performance_options = {
-    'Faster':                  'tiny.en',
-    'Faster - English Only':   'tiny.en',
-    'Fast':                    'base.en',
-    'Fast - English Only':     'base.en',
-    'Balanced':                'small.en',
-    'Balanced - English Only': 'small.en',
-    'Accurate':                'medium.en',
-    'Accurate - English Only': 'medium.en',
-    'More Accurate': 'large',
+# Create dictionary of the dimensions and their respective number of questions
+dimensions = {
+    'A': np.arange(1, 4),
+    'B': np.arange(1, 8),
+    'C': np.arange(1, 5),
+    'D': np.arange(1, 5),
+    'E': np.arange(1, 5),
+    'F': np.arange(1, 4),
+    'G': np.arange(1, 5),
+    'H': np.arange(1, 4),
+    'I': np.arange(1, 5),
+    'J': np.arange(1, 5),
+    'K': np.arange(1, 3),
+    'L': np.arange(1, 5),
+    'M': np.arange(1, 4),
+    'N': np.arange(1, 4),
+    'O': np.arange(1, 4),
+    'P': np.arange(1, 4),
     }
 
-performance_description = {
-    'Faster': '(media length x 0.5)',
-    'Faster - English Only': '(media length x 0.5)',
-    'Fast': '(media length)',
-    'Fast - English Only': '(media length)',
-    'Balanced': '(media length x 2)',
-    'Balanced - English Only': '(media length x 2)',
-    'Accurate': '(media length x ?)',
-    'Accurate - English Only': '(media length x ?)',
-    'More Accurate': '(media length x ?)',
+# Years to simulate
+survey_years = [
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    ]
+
+# Expand the questions as 'A.1', 'A.2', 'B.1' ... etc
+dimensions_questions = [f'{dimension}.{item}' for dimension, items in dimensions.items() for item in items]
+
+# Set likert scale items and weights
+likert_scale_items = {
+    'Strongly Disagree': 1,
+    'Disagree': 2,
+    'Somewhat Disagree': 3,
+    'Somewhat Agree': 4,
+    'Agree': 5,
+    'Strongly Agree': 6,
     }
 
-# Set default Whisper model size
-model_size = performance_options['Fast']
+# Set sex items
+sex_items = [
+    'Female',
+    'Male',
+    ]
 
-# Set session state
-st.session_state['temp'] = False
+# Set program items
+program_items = [
+    'Degree (BA)',
+    'Degree (BSc)',
+    'Diploma in Education',
+    'Diploma in Special Education',
+    'PGDE (JC)',
+    'PGDE (Pri)',
+    'PGDE (Sec)',
+    ]
 
-# Display radio box
-max_len_perf_opt = max(list(map(len, performance_options.keys())))
-max_len_perf_desc = max(list(map(len, performance_description.values())))
-performance = st.radio(
-    'Select performance: (approximate processing time in brackets)',
-    options=('Faster', 'Fast'),
-    index=1,
-    key='per_radio_input',
-    format_func=lambda label: label.ljust(max_len_perf_opt) + performance_description[label],  # padding does not work here
-    disabled=False,
-    horizontal=False,
-    label_visibility='visible'  # visible, hidden, collapsed
+if 'D:' in str(Path.cwd()):
+    data_path = Path.cwd() / 'Data/'
+else:
+    data_path = Path.cwd() / 'app/Data/'
+
+@st.cache(allow_output_mutation=True)
+def getNLP():
+    return spacy.load( data_path / 'trained-pipeline-2000')
+
+@st.cache(allow_output_mutation=True)
+def get_dataframe():
+    
+
+    # Read data files
+    df_dict = {}
+
+    for year in survey_years:
+        # Construct pandas dataframe from Excel data
+        df = pd.read_excel(
+            f'{data_path}/Simulated_Data_{year}.xlsx',
+            index_col=None,
+            engine='openpyxl',
+        )
+
+        # Drop rows with NA in specified columns
+        df = df.dropna(subset=dimensions_questions)
+
+        # Construct a dict of column-value replacer to map Likert scale items to numeric values
+        replacer = {question:likert_scale_items for question in dimensions_questions}
+        P_2_replacer = {'P.2': {key: 7 - value for key, value in likert_scale_items.items()}}  # to invert P.2
+        replacer = replacer | P_2_replacer
+
+        # Replace values in dataframe using replacer
+        df = df.replace(replacer)
+
+        # Create a mean column for each dimension
+        for dimension in dimensions:
+            # Get the column names for this dimension
+            columns = [question for question in dimensions_questions if question.startswith(f'{dimension}.')]
+
+            # Get mean of the columns in this dimension
+            df[dimension] = df[columns].mean(axis=1).round(2)
+
+        # Add a year column to dataframe
+        df['Year'] = year
+
+        # Drop individual questions columns in the dimensions
+        df = df.drop(columns=dimensions_questions)
+
+        # Add dataframe to collection
+        df_dict[year] = df
+
+    # Concat all dataframes in df_dict
+    df = pd.concat(df_dict.values(), axis=0, ignore_index=True)
+
+    # Unpivot dimension columns
+    columns_to_unpivot = set(df.columns) - set(dimensions.keys())
+    df = df.melt(id_vars=columns_to_unpivot, value_vars=dimensions.keys(), var_name='Dimension', value_name='Dimension_Mean')
+
+    return df
+
+df = get_dataframe()
+
+# st.dataframe(data=df, width=500, height=300, use_container_width=True)
+
+
+selected_year_widget = st.sidebar.radio('year', survey_years[::-1], horizontal=True, key='selected_year_widget')
+selected_programs_widget = st.sidebar.multiselect('programs', program_items, default=program_items, key='selected_programs_widget')
+selected_sex_widget = st.sidebar.multiselect('sex', sex_items, default=sex_items, key='selected_sex_widget')
+
+selected_year = selected_year_widget
+selected_year_previous = x if (x := selected_year - 1) in df['Year'].values else selected_year
+selected_programs = selected_programs_widget if len(selected_programs_widget) > 0 else program_items
+selected_sex = selected_sex_widget if len(selected_sex_widget) > 0 else sex_items
+
+def cohen_d(*, mean1=1, mean2=1, std1=1, std2=1):
+    # Calculate Cohen's d using Welch’s t-test formula where variance of both groups are not equal
+    diff = abs(mean1 - mean2)
+    pooledstd = math.sqrt((std1**2 + std2**2) / 2)
+    cohen_d_numeric = round(diff / pooledstd, 3)
+
+    # Convert numeric d to categorical d
+    match cohen_d_numeric:
+        # Sawilowsky's rule of thumb
+        case cohen_d_numeric if cohen_d_numeric >= 2.0:
+            cohen_d_categorical = 'Huge'
+        case cohen_d_numeric if cohen_d_numeric >= 1.2:
+            cohen_d_categorical = 'Very Large'
+        case cohen_d_numeric if cohen_d_numeric >= 0.8:
+            cohen_d_categorical = 'Large'
+        case cohen_d_numeric if cohen_d_numeric >= 0.5:
+            cohen_d_categorical = 'Medium'
+        case cohen_d_numeric if cohen_d_numeric >= 0.2:
+            cohen_d_categorical = 'Small'
+        case _:
+            cohen_d_categorical = 'Very Small'
+
+    Cohen_D = namedtuple('Cohen_D', ['numeric', 'categorical'])
+    return Cohen_D(cohen_d_numeric, cohen_d_categorical)
+
+
+def get_random_likert_scale_items() -> list:
+    return rng.choice(
+        [*likert_scale_items.keys()],
+        size=respondentsCount,
+        replace=True,
+        p=[0.10, 0.10, 0.10, 0.20, 0.25, 0.25]  # 'Strongly Disagree', 'Disagree', 'Somewhat Disagree', 'Somewhat Agree', 'Agree', 'Strongly Agree'
+        ).tolist()
+
+
+def get_random_sex_items() -> list:
+    return rng.choice(
+        sex_items,
+        size=respondentsCount,
+        replace=True,
+        p=[0.65, 0.35],  # 'Female', 'Male'
+        ).tolist()
+
+
+def get_random_program_items() -> list:
+    return rng.choice(
+        program_items,
+        size=respondentsCount,
+        replace=True,
+        p=None,  # 'Degree (BA)', 'Degree (BSc)', 'Diploma in Education', 'Diploma in Special Education', 'PGDE (JC)', 'PGDE (Pri)', 'PGDE (Sec)'
+        ).tolist()
+
+
+def get_mean():
+    mean_dict = {}
+
+    for dimension in dimensions.keys():
+        filters = ((df['Program'].isin(selected_programs)) &
+                   (df['Sex'].isin(selected_sex)) &
+                   (df['Dimension'] == dimension)
+                  )
+        the_mean = df[(df['Year'] == selected_year) & filters]['Dimension_Mean'].mean()
+
+        mean_dict[dimension] = the_mean
+
+    return mean_dict
+
+
+def get_current_previous_year_P():
+    p_value_dict = {}
+
+    for dimension in dimensions.keys():
+        if selected_year == selected_year_previous:
+            p_value_dict[dimension] = 0
+        else:
+            filters = ((df['Program'].isin(selected_programs)) &
+                       (df['Sex'].isin(selected_sex)) &
+                       (df['Dimension'] == dimension)
+                      )
+            A = df[(df['Year'] == selected_year) & filters]['Dimension_Mean']
+            B = df[(df['Year'] == selected_year_previous) & filters]['Dimension_Mean']
+
+            p_value_dict[dimension] = ttest_ind(A, B).pvalue
+
+    return p_value_dict
+
+
+def get_current_previous_year_D():
+    d_value_dict = {}
+
+    for dimension in dimensions.keys():
+        if selected_year == selected_year_previous:
+            d_value_dict[dimension] = 0
+        else:
+            filters = ((df['Program'].isin(selected_programs)) &
+                       (df['Sex'].isin(selected_sex)) &
+                       (df['Dimension'] == dimension)
+                      )
+            A = df[(df['Year'] == selected_year) & filters]['Dimension_Mean']
+            B = df[(df['Year'] == selected_year_previous) & filters]['Dimension_Mean']
+
+            d_value_dict[dimension] = cohen_d(mean1=A.mean(), mean2=B.mean(), std1=A.std(), std2=B.std()).numeric
+
+    return d_value_dict
+
+filters = ((df['Year'] == selected_year) &
+           (df['Program'].isin(selected_programs)) &
+           (df['Sex'].isin(selected_sex))
+           )
+
+filtered_df = df[filters]
+filtered_df = filtered_df.drop_duplicates(subset=['Dimension'])
+
+mean_values = get_mean()
+filtered_df['Mean'] = filtered_df['Dimension'].apply(lambda p: mean_values[p])
+
+p_values = get_current_previous_year_P()
+filtered_df['Significance'] = filtered_df['Dimension'].apply(lambda p: p_values[p])
+
+d_values = get_current_previous_year_D()
+filtered_df['Effect Size'] = filtered_df['Dimension'].apply(lambda d: d_values[d])
+
+# st.dataframe(data=filtered_df, width=500, height=300, use_container_width=True)
+
+# Construct a bar trace for pvalue
+mean_trace = go.Bar(
+    name='Mean',
+    x=filtered_df['Dimension'],
+    y=filtered_df['Mean'].round(2),
+    # customdata=results_df[['Effect Size Numerical', 'Effect Size Categorical']],
+    # hovertemplate=(
+    #     'P Value: %{y}<br>' +
+    #     'Effect Size Numerical: %{customdata[0]}<br>' +
+    #     'Effect Size Categorical: %{customdata[1]}<br>' +
+    #     '<extra></extra>'  # remove the trace name
+    #     ),
+    text=filtered_df['Mean'].round(2), # data label
+    textangle=0,
+    textposition ='inside',
     )
 
-# Display a placeholder for diagnostics messages
-placeholder = st.empty()
-with placeholder.container():
-    model_size = performance_options[performance]
-    # st.write(model_size)
+# Construct a bar trace for effect size
+# effect_size_trace = go.Bar(
+#     name='Effect Size',
+#     x=results_df['2021 → 2022 Dimension'],
+#     y=results_df['Effect Size Numerical'],
+#     )
 
-# Display a file uploader
-file = st.file_uploader('Upload an audio or video file', type=['mp3', 'aac', 'wav', 'mp4'])
-if file is not None:
-    # Get file extension
-    file_extension = Path(file.name).suffix[1:]  # Path(file.name).suffix returns with dot, i.e., '.wav'
+# Create figure object using constructed traces
+fig1 = go.Figure(
+    data=[mean_trace],
+    )
 
-    # Display an audio/video player
-    if file_extension == 'mp4':
-        st.video(file.read(), format='video/' + file_extension, start_time=0)
-    else:
-        st.audio(file.read(), format='audio/' + file_extension, start_time=0)
+fig1.update_layout(
+    title={
+        'text': 'Mean',
+        'x':0.5,
+        'y':0.9,
+        'xanchor': 'auto',
+        'yanchor': 'auto',
+    },
+    xaxis_title=f'Mean for each Dimension in {selected_year}',
+    yaxis_title='Dimension_Mean',    
+    template='plotly_dark',
+    height=600,
+    )
+st.plotly_chart(fig1, use_container_width=True)
 
-@st.cache(persist=False, allow_output_mutation=True, show_spinner=False, suppress_st_warning=True, ttl=1800)
-def transcribe_media(file, model_size):
-    if file is not None:
-        # Print diagnostics message; disable in production mode
-        # st.write("First run. Cached in memory.")
 
-        # Get file extension
-        file_extension = Path(file.name).suffix[1:]  # Path(file.name).suffix returns with dot, i.e., '.wav'
-        
-        # Write uploaded file to temp storage
-        with NamedTemporaryFile(suffix=file_extension) as tempFile:
-            tempFile.write(file.getvalue())  # copy value of uploaded file to temporarily created file
-            tempFile.seek(0)
 
-            # Load whisper model and transcribe
-            DEVICE = 'cpu'  # 'cuda' if torch.cuda.is_available() else 'cpu'
-            transcribe_message = f'No GPU acceleration 😢, transcribing using CPU ...' if DEVICE == 'cpu' else f'Transcribing using GPU ...'
-            with st.spinner(transcribe_message):
-                model = pywhisper.load_model(model_size, device=DEVICE)
-                result = model.transcribe(audio=tempFile.name, verbose=False, fp16=False)
+# Construct a bar trace for significance
+significance_trace = go.Bar(
+    name='Significance',
+    x=filtered_df['Dimension'],
+    y=filtered_df['Significance'].round(2),
+    # customdata=results_df[['Effect Size Numerical', 'Effect Size Categorical']],
+    # hovertemplate=(
+    #     'P Value: %{y}<br>' +
+    #     'Effect Size Numerical: %{customdata[0]}<br>' +
+    #     'Effect Size Categorical: %{customdata[1]}<br>' +
+    #     '<extra></extra>'  # remove the trace name
+    #     ),
+    text=filtered_df['Significance'].round(2), # data label
+    textangle=0,
+    textposition ='inside',
+    )
 
-        # Extract transcript from segments
-        transcript_text = ''
+# Construct a bar trace for effect size
+effect_size_trace = go.Bar(
+    name='Effect Size',
+    x=filtered_df['Dimension'],
+    y=filtered_df['Effect Size'].round(2),
+    # customdata=results_df[['Effect Size Numerical', 'Effect Size Categorical']],
+    # hovertemplate=(
+    #     'P Value: %{y}<br>' +
+    #     'Effect Size Numerical: %{customdata[0]}<br>' +
+    #     'Effect Size Categorical: %{customdata[1]}<br>' +
+    #     '<extra></extra>'  # remove the trace name
+    #     ),
+    text=filtered_df['Effect Size'].round(2), # data label
+    textangle=0,
+    textposition ='inside',
+    )
 
-        # Transform transcript into the srt format
-        for index, segment in enumerate(result['segments']):
-            start_time_delta = timedelta(seconds=int(segment['start']))  # timedelta attributes: days, seconds, microseconds
-            end_time_delta = timedelta(seconds=int(segment['end']))  # timedelta attributes: days, seconds, microseconds
+# Create figure object using constructed traces
+fig2 = go.Figure(
+    data=[significance_trace, effect_size_trace],
+    )
 
-            start_hour0 = '0' if segment['start'] < (10 * 60 * 60) else ''  # Append '0' if less than 10 hours
-            end_hour0 = '0' if segment['end'] < (10 * 60 * 60) else ''  # Append '0' if less than 10 hours
+fig2.update_layout(
+    title={
+        'text': 'Significance and Effect Size',
+        'x':0.5,
+        'y':0.9,
+        'xanchor': 'auto',
+        'yanchor': 'auto',
+    },
+    xaxis_title=f'Significance and Effect Size for each Dimension in {selected_year}',
+    yaxis_title=None,
+    yaxis_rangemode='nonnegative',
+    height=600,
+    template='plotly_dark',
+    )
 
-            start_milliseconds = int((segment['start'] % 1) * 1000)
-            end_milliseconds = int((segment['start'] % 1) * 1000)
+st.plotly_chart(fig2, use_container_width=True)
 
-            start_time = start_hour0 + str(start_time_delta) + ',' + f'{start_milliseconds:03d}'
-            end_time = end_hour0 + str(end_time_delta) + ',' + f'{end_milliseconds:03d}'
-            text = segment['text'][1:] if segment['text'][0] == ' ' else segment['text']
 
-            segment_id = f"{segment['id'] + 1}\n"
-            segment_start_time = f"{start_time} --> {end_time}\n"
-            segment_end_time = f"{text}"
 
-            transcript_text = transcript_text + '\n\n' if transcript_text != '' else transcript_text
-            transcript_text = transcript_text + segment_id + segment_start_time + segment_end_time
 
-            if index < preview_length:
-                transcript_text_preview = transcript_text
-            
-        return file, transcript_text, transcript_text_preview
-    else:
-        return None, None, None
 
-def timedelta_to_hr_min_sec(td):
-    _hr = td.seconds // 60 // 60 # hour
-    _min = (td.seconds // 60) - (_hr * 60)
-    _sec = (td.seconds) - (_hr * 60 * 60)  - (_min * 60)
-    
-    _time = ''
-    _time = _time + str(_hr) + ' hour ' if _hr != 0 else _time
-    _time = _time + str(_min) + ' min '
-    _time = _time + str(_sec) + ' sec'    
-    return _time
 
-time_start = datetime.now()
-audio, transcript_text, transcript_text_preview = transcribe_media(file, model_size)
-time_end = datetime.now()
-time_taken = timedelta_to_hr_min_sec(time_end - time_start)
 
-if file is not None and transcript_text != '':
-    # Display 'success' status
-    st.success('Transcribed in ' + time_taken + '. Full transcript can be downloaded below.')
 
-    # Display preview of transcript
-    preview_message = f'Previewing first {preview_length} segments of transcript.'
-    st.text(preview_message)
-    st.text(transcript_text_preview)
-    
-    # Display a file download button to download completed transcript
-    st.download_button(
-        label='Download Transcript',
-        data=transcript_text,
-        file_name=str(Path(file.name).with_suffix('.srt')),
-        mime='text/srt'
+
+
+# nlp = getNLP()
+df_test = pd.read_csv(
+            f"{data_path / 'test_cleaned_w_predictions-10000.csv'}",
+            index_col=None,
         )
-    st.caption('Transcript is formatted in the subtitle format. Can be opened using any text editor.', unsafe_allow_html=False)
+df_test = df_test[['Label', 'News', 'News_Cat_Predicted', 'Accuracy']]
+labels = {1: 'World', 2: 'Sports', 3: 'Business', 4: 'Sci/Tech'}
+# news_selection_items = []
+# rng = np.random.default_rng()
+# if 'df_test_random_rows' not in st.session_state:
+#     st.session_state['df_test_random_rows'] = rng.choice(np.arange(0, len(df_test) / 4, dtype='int'), size=3, replace=False)
+# for label in labels.values():
+#     news_selection_items.extend(df_test[df_test['Label'] == label].iloc[st.session_state['df_test_random_rows']]['News'].tolist())
+# selected_news_widget = st.selectbox('Select sample news', news_selection_items, key='selected_news_widget')
+# selected_news_widget_text_area = st.text_area('Input news', value=selected_news_widget, height=100)
+# predict_button_widget = st.button('Predict News Category')
+# if predict_button_widget:
+#     st.text(selected_news_widget_text_area)
+
+df_test = df_test.rename(columns={'Label': 'Label', 'News': 'News', 'News_Cat_Predicted': 'Predicted' , 'Accuracy': 'Prediction Correct'})
+st.dataframe(df_test, use_container_width=True)
+
+overall_accuracy = round(df_test['Prediction Correct'].sum() / len(df_test), 3)
+category_accuracy = {}
+for label in labels.values():
+    category_accuracy[label] = round(df_test[df_test['Label'] == label]['Prediction Correct'].sum() / len(df_test[df_test['Label'] == label]), 3)
+
+results = f'''            
+            Overall Accuracy: {overall_accuracy}
+            "World" Accuracy: {category_accuracy['World']}
+            "Sports" Accuracy: {category_accuracy['Sports']}
+            "Business" Accuracy: {category_accuracy['Business']}
+            "Sci/Tech" Accuracy: {category_accuracy['Sci/Tech']}
+            '''
+st.text(results)
