@@ -425,19 +425,28 @@ labels = {1: 'World', 2: 'Sports', 3: 'Business', 4: 'Sci/Tech'}
 # if predict_button_widget:
 #     st.text(selected_news_widget_text_area)
 
-df_test = df_test.rename(columns={'Label': 'Label', 'News': 'News', 'News_Cat_Predicted': 'Predicted' , 'Accuracy': 'Prediction Correct'})
-st.dataframe(df_test, use_container_width=True)
-
-overall_accuracy = round(df_test['Prediction Correct'].sum() / len(df_test), 3)
+overall_accuracy = round(df_test['Accuracy'].sum() / len(df_test), 3)
 category_accuracy = {}
 for label in labels.values():
-    category_accuracy[label] = round(df_test[df_test['Label'] == label]['Prediction Correct'].sum() / len(df_test[df_test['Label'] == label]), 3)
+    category_accuracy[label] = round(df_test[df_test['Label'] == label]['Accuracy'].sum() / len(df_test[df_test['Label'] == label]), 3)
 
-results = f'''            
-            Overall Accuracy: {overall_accuracy}
-            "World" Accuracy: {category_accuracy['World']}
-            "Sports" Accuracy: {category_accuracy['Sports']}
-            "Business" Accuracy: {category_accuracy['Business']}
-            "Sci/Tech" Accuracy: {category_accuracy['Sci/Tech']}
-            '''
+results = f'Accuracy: {overall_accuracy}'
 st.text(results)
+st.dataframe(df_test, use_container_width=True)
+
+
+def multiclass_confusion_matrix(row):
+    cols_name = [*row.index]  # column name; becomes indices as a series
+    row_name = row.name  # row name; becomes series name
+    
+    return [len(df_test[(df_test['Label'] == col) & (df_test['News_Cat_Predicted'] == row_name)]) for col in cols_name]
+
+
+df_cm = pd.DataFrame(data={value:np.zeros(4, dtype='int') for value in labels.values()}, index=labels.values())
+df_cm = df_cm.apply(multiclass_confusion_matrix, axis=1, result_type='broadcast')
+df_cm = pd.concat([df_cm, pd.DataFrame(data=[df_cm.agg('sum')], index=['Actual Total'], columns=['Business', 'Sci/Tech', 'Sports', 'World'])], axis=0)
+df_cm['Predicted Total'] = df_cm.sum(axis=1)
+
+st.text('Confusion Matrix')
+st.dataframe(df_cm)
+
