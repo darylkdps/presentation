@@ -38,6 +38,8 @@ st.markdown(
     Significance and effect size is always in relation to the previous year.
     ''')
 
+st.header('Quantitative Analysis', anchor=None)
+
 # Create dictionary of the dimensions and their respective number of questions
 dimensions = {
     'A': np.arange(1, 4),
@@ -161,6 +163,7 @@ df = get_dataframe()
 
 # st.dataframe(data=df, width=500, height=300, use_container_width=True)
 
+st.sidebar.subheader('Quantitative Analysis Filters')
 
 selected_year_widget = st.sidebar.radio('year', survey_years[::-1], horizontal=True, key='selected_year_widget')
 selected_programs_widget = st.sidebar.multiselect('programs', program_items, default=program_items, key='selected_programs_widget')
@@ -402,9 +405,7 @@ st.plotly_chart(fig2, use_container_width=True)
 
 
 
-
-
-
+st.header('Qualitative Analysis', anchor=None)
 
 # nlp = getNLP()
 df_test = pd.read_csv(
